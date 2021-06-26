@@ -1,0 +1,54 @@
+
+def request_test(text):
+    req = '1'
+    val = text.replace('select', '[R_' + str(req) + ']select', 1) \
+        .replace('from', '[R_' + str(req) + ']from', 1) \
+        .replace('where', '[R_' + str(req) + ']where', 1)
+
+    return val
+
+def bracket_hider(text):
+    bracket_index = text.find('(')
+    while bracket_index != -1:
+        bracket_balance = 1
+        min_b = bracket_index + 1
+        while bracket_balance != 0:
+            open_bi = text.find('(', min_b)
+            close_bi = text.find(')', min_b)
+            if close_bi == open_bi == -1:
+                return 'Ошибка'
+            elif (open_bi < close_bi) and (open_bi != -1):
+                bracket_balance += 1
+                min_b = open_bi + 1
+            else:
+                bracket_balance -= 1
+                min_b = close_bi + 1
+        text = text[0:bracket_index] + '[section]' + text[close_bi+1:]
+        bracket_index = text.find('(')
+    return text
+
+def main(text):
+    val = text
+    return request_test(bracket_hider(val))
+
+
+def find(text, component):
+    occurrence = []
+    find_ind = text.find(component)
+    while find_ind != -1:
+        occurrence.append(find_ind)
+        find_ind = text.find(component, find_ind + len(component))
+    return occurrence
+
+def find_requests(text):
+    print(find(text, 'select'))
+    print(find(text, 'from'))
+    print(find(text, 'where'))
+    print(find(text, '('))
+    print(find(text, ')'))
+    print(text[0:9])
+    print(text[9:41])  # 16
+    print(text[41:])
+    return 1
+
+

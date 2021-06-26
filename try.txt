@@ -1,0 +1,40 @@
+begin_try
+
+      exec Bill_Add @ID_Account, @ID_Bill_Type, @Period, @Bill_Date, @Splitting_Type, @ID_Bill = @ID_Bill output
+
+
+      DECLARE ServCur CURSOR FOR
+       select Id_service, Sum(SumPay), Sum(SumFine) from(
+        SELECT Id_Service, Sum(SumPay) SumPay, 0 SumFine
+        from #Split_Result_By_Service
+        where ID_Sum <> 2
+        group by ID_Service having Sum(SumPay) <> 0
+        union all
+        SELECT Id_Service, 0 SumPay, Sum(SumPay) SumFine from #Split_Result_By_Service
+        where ID_Sum = 2 group by ID_Service having Sum(SumPay) <> 0
+      ) a
+      group by id_service
+
+      OPEN ServCur
+      FETCH ServCur INTO @ID_Service, @SumPay, @SumFine
+      WHILE @@FETCH_STATUS = 0
+      BEGIN
+        exec Bill_Detail_Add @Id_Bill, @ID_Service, default, @SumPay, @SumFine
+        FETCH ServCur INTO @ID_Service, @SumPay, @SumFine
+      END
+      CLOSE ServCur
+      DEALLOCATE ServCur
+
+
+      declare @Split_Negative int
+      set @Split_Negative = dbo.Get_System_Parameter_Float_Value('#BILL_DETAIL_SPLIT_BY_NEGATIVE', 0)
+      exec Bill_Set_Paid @ID_Bill, @ID_Pack, default, @Pay_Date, @Splitting_Type, @Split_Negative
+      commit transaction
+      return 1
+    end_try
+    begin_catch
+      rollback transaction
+      declare @ErrMess varchar(max)
+      set @ErrMess = ERROR_MESSAGE()
+      exec Raise 'Empty_Message', Null, @ErrMess
+    end_catch

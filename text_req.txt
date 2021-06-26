@@ -1,0 +1,197 @@
+if @ResultTableName is not null
+    begin
+      set @SQL='insert into ' + @ResultTableName + '
+	  (Checked, ID_Service, Service, SumBalance, SumFact, Summ, Fine, SumPay, SumFine, Past_Prov)
+        s_elect Checked, ID_Service, Service, SumBalance, SumFact, Summ, Fine, SumPay, SumFine, Past_Prov
+        from #R'
+      exec sp_executesql @SQL
+    end
+
+if @Use_Service_Provider_Table=1 and object_ID('tempdb..#Service_Provider_Filter') is Null
+begin
+	raiserror('Ошибка расщепления. Не верно передан входной параметр фильтрации по услугам и поставщикам.', 15, 1)
+	return
+end
+
+declare @SQL nvarchar(max), @s varchar(max), @DEBUG bit
+
+declare @Service_Provider_Filter table(ID_Service int, ID_Provider int)
+
+if @Use_Service_Provider_Table=1 and object_ID('tempdb..#Service_Provider_Filter') is not Null
+BEGIN
+	set @SQL = 'select ID_Service, ID_Provider from #Service_Provider_Filter'
+	insert @Service_Provider_Filter(ID_Service, ID_Provider)
+	exec (@SQL)
+END
+
+CREATE TABLE #R(
+	Checked bit,
+	ID_Service int,
+	Service varchar(100),
+	SumBalance money,
+	SumFact money,
+	Summ money,
+	Fine money,
+	SumPay money,
+	SumFine money,
+	Past_Prov int,
+	Summ_Show money
+)
+
+if @DEBUG = 1
+	SET @DebugMainTables = 1
+
+set @Sum_Pay = coalesce(@Sum_Pay, 0)
+set @Sum_Fine = coalesce(@Sum_Fine, 0)
+
+if @Period Is Null
+	SELECT @Period = dbo.Work_Period()
+
+
+
+
+
+DECLARE @Split_Period int, @Split_Use_Sum_Priority bit, @FOREIGN_PAYS_SPLIT_USE_SUM_PRIORITY_PERIOD bit
+set @Split_Period=dbo.Get_System_Parameter_Float_Value('#BILL_USE_SPLIT_QUEUE_USE_CUR_PERIOD',0)
+
+
+set @Split_Use_Sum_Priority = dbo.Get_System_Parameter_Float_Value('#FOREIGN_PAYS_SPLIT_USE_SUM_PRIORITY', 0)
+
+
+set @FOREIGN_PAYS_SPLIT_USE_SUM_PRIORITY_PERIOD = dbo.Get_System_Parameter_Float_Value('#FOREIGN_PAYS_SPLIT_USE_SUM_PRIORITY_PERIOD', 0)
+
+
+if @Split_Use_Sum_Priority = 1 and @FOREIGN_PAYS_SPLIT_USE_SUM_PRIORITY_PERIOD = 0
+begin
+if @Split_Period=1
+    set @Period = dbo.Work_Period()
+else
+	if @Split_Period=2
+set @Period = dbo.Work_Period()-1
+end
+
+if (@AutoSplitting = 1 and @Sum_Pay = 0 and @Sum_Fine = 0)
+	or (@AutoSplitting = 1 and Not @ID_Bill Is Null)
+	return
+
+
+if (Not @ID_Bill Is Null) and Exists(select ID_Bill from Bill where ID_Bill = @ID_Bill)
+Begin
+    insert into #R(
+      Checked,
+      Id_Service,
+      [Service],
+      SumBalance,
+      SumFact,
+      Summ,
+      Fine,
+      SumPay,
+      SumFine,
+      Past_Prov,
+      Summ_Show
+    )
+    select
+      case
+        when SumPay = 0 and SumFine = 0 then 0
+        else 1
+      end Checked,
+      b.Id_Service,
+      s.Name [Service],
+      0 SumBalance,
+      0 SumFact,
+      0 Summ,
+      0 Fine,
+      SumPay,
+      SumFine,
+      0,
+      0 Summ_Show
+    from (
+      select ID_Service,
+      Sum(Sum_Pay) SumPay,
+      Sum(Sum_Fine) SumFine
+      from Bill_Detail
+      where ID_Bill = @ID_Bill
+      group by ID_Service
+      having Sum(Sum_Pay) <> 0 or Sum(Sum_Fine) <> 0
+    ) b
+    inner join [Service] s on b.ID_Service = s.ID_Service
+
+    if @ResultTableName is not null
+    begin
+      set @SQL='insert into ' + @ResultTableName + '
+	  (Checked, ID_Service, Service, SumBalance, SumFact, Summ, Fine, SumPay, SumFine, Past_Prov)
+        s_elect Checked, ID_Service, Service, SumBalance, SumFact, Summ, Fine, SumPay, SumFine, Past_Prov
+        from #R'
+      exec sp_executesql @SQL
+    end
+    else
+    begin
+      if @ReturnAllServices=1
+        insert into #R(Checked, Id_Service, Service, SumBalance, SumFact, Summ, Fine, SumPay, SumFine, Past_Prov, Summ_Show)
+        select 0 as checked, vp.ID_Service, vp.name As Service, 0 as SumBalance, 0 as SumFact,0 as Summ,
+			0 as Fine, 0 as SumPay, 0 as SumFine, 0 as Past_Prov, 0 as Summ_show
+        from VService_Period vp
+        Where vp.Period=@Period
+          and NOT EXISTS(
+            SELECT r.ID_Service FROM #R r
+            WHERE r.ID_Service = vp.ID_Service
+          )
+          and (@Service_List is null
+            or vp.ID_Service In (select ID from dbo.List_To_Table(@Service_List,default))
+          )
+      if @WithProviderGroup = 0
+        select * from #R
+      else
+        select r.*, 0 as ID_Provider_group from #R as r
+    end
+    select @AboutSplit = 'Квитанция №' + cast(@ID_Bill as varchar) +
+      ' за '+ Month_Name + ' ' + cast([Year] as varchar)
+    from Period
+    where
+      Period = (select Period from Bill where ID_Bill = @ID_Bill)
+    return
+end
+
+
+if coalesce(@SplitSum, 0) Not In (0,1,2,3,-1)
+	set @SplitSum = 1
+
+
+if @ReturnAllServices = 1
+begin
+
+
+	set @AutoSplitting = 0
+end
+
+if @Split_Use_Sum_Priority = 1
+	set @ID_Bill_Type = 300
+
+DECLARE @Bill_Detail_Split_By_Negative bit
+if @Split_Use_Sum_Priority = 1
+	set @Bill_Detail_Split_By_Negative = 0
+else
+	set @Bill_Detail_Split_By_Negative = dbo.Get_System_Parameter_Float_Value('#BILL_DETAIL_SPLIT_BY_NEGATIVE', 0)
+
+
+
+if @SplitFineAlone is Null
+if @Split_Use_Sum_Priority = 1
+	set @SplitFineAlone = dbo.Get_System_Parameter_Float_Value('#FOREIGN_PAYS_SPLIT_FINE', 0)
+else
+	set @SplitFineAlone = 1
+
+if @debug = 1
+begin
+	if Not object_id('tempdb..#Split_Data_Table') is null
+		drop Table #Split_Data_Table
+	create table #Split_Data_Table
+	(Id_Service int, ID_Provider int, Id_Sum int, Summ MONEY,
+	Priority int, Pay MONEY, Priority_Service int, Priority_Provider int, Split0 int, SplitService bit)
+end
+
+if @debug = 1
+begin
+	set @S=convert(varchar, getdate(), 114)+'. INSERT INTO #Split_Data_Table'
+	raiserror(@S, 0, 77) with nowait
+end

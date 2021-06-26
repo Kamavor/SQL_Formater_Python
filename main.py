@@ -1,8 +1,4 @@
-# This is a sample Python script.
 
-# Press Shift+F10 to execute it or replace it with your code.
-# Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
-import time
 
 import pyodbc
 import text_work as tw
@@ -52,7 +48,6 @@ def escaping_words(x: str):
 
 if __name__ == '__main__':
     text_file = open('text_req.txt', 'r', encoding="utf-8")
-    # text_file = open('1t.txt', 'r', encoding="utf-8")
     text_full = text_file.read().lower()
     text_full = only_spaces(text_full)
     text_full = escaping_words(text_full)
